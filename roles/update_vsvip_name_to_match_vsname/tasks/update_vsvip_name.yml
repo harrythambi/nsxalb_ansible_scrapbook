@@ -1,0 +1,28 @@
+---
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{controller}}"
+      username: "{{username}}"
+      password: "{{password}}"
+      tenant: "{{tenant}}" 
+
+- name: Get Referenced vsvip
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: vsvip
+    params:
+      referred_by: "virtualservice:{{vs.uuid}}"
+  register: vsvip_output
+
+- name: Update vsvip name
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "vsvip/{{vsvip_output.obj.results[0].uuid}}"
+    data:
+      replace:
+        name: "{{vs.name}}-vsvip"

@@ -1,0 +1,5 @@
+---
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - update_vs_with_pool_from_poolgroup

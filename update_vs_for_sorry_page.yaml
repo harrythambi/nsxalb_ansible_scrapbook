@@ -1,0 +1,8 @@
+---
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - role: update_vs_for_sorry_page
+  vars:
+    error_page_profile_name: "{{avi_sorry_page_profile}}"
+  tags: update_vs_for_sorry_page

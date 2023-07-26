@@ -1,0 +1,22 @@
+---
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{controller}}"
+      username: "{{username}}"
+      password: "{{password}}"
+
+- name: Get list of virtualservices
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: virtualservice
+  register: vs_output
+
+- name: Update Virtual Services where defined
+  include_tasks: update_vs_with_pool.yml
+  loop: "{{vs_output.obj.results}}"
+  loop_control:
+    loop_var: vs
+  when: vs.pool_group_ref is defined

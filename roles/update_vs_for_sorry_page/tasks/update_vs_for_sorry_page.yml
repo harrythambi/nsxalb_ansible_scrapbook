@@ -1,0 +1,80 @@
+---
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{controller}}"
+      username: "{{username}}"
+      password: "{{password}}"
+      tenant: "{{tenant}}" 
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login 
+    http_method: get
+    path: "cloud?name={{cloud_name}}"
+  register: cloud_data
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login 
+    http_method: get
+    path: virtualservice
+    params:
+      include_name: true
+      sort: name
+      cloud_uuid: "{{cloud_data.obj.results[0].uuid}}"
+      name: "{{vs_name}}"
+  register: virtualservice
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login 
+    http_method: get
+    path: errorpageprofile
+    params:
+      include_name: true
+      sort: name
+      name: "{{error_page_profile_name}}"
+  register: errorpageprofile
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "virtualservice/{{vs_uuid}}"
+    data:
+      replace:
+        error_page_profile_ref: "{{error_page_profile_url}}"
+  vars:
+    vs_uuid: "{{virtualservice.obj.results[0].uuid}}"
+    error_page_profile_url: "{{errorpageprofile.obj.results[0].url}}"
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login
+    tenant: "{{tenant}}" 
+    http_method: get
+    path: "poolgroup"
+    params:
+      include_name: true
+      sort: name
+      cloud_uuid: "{{cloud_data.obj.results[0].uuid}}"
+      name: "{{pg_name}}"
+  register: poolgroup
+  vars:
+    pg_name: "{{virtualservice.obj.results[0].pool_group_ref.split('#')[1]}}"
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login
+    tenant: "{{tenant}}" 
+    http_method: patch
+    path: "poolgroup/{{pg_uuid}}"
+    data:
+      add:
+        fail_action:
+          local_rsp:
+            status_code: "FAIL_HTTP_STATUS_CODE_503"
+          type: "FAIL_ACTION_HTTP_LOCAL_RSP"
+  vars:
+    pg_uuid: "{{poolgroup.obj.results[0].uuid }}"
+  delegate_to: localhost

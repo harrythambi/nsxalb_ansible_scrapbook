@@ -1,0 +1,6 @@
+---
+- hosts: localhost
+  gather_facts: false
+  roles:
+    - role: update_vs_for_http2https
+  tags: update_vs_for_http2https

@@ -1,0 +1,77 @@
+---
+- hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: set facts
+      set_fact:
+        avi_login: &avi_login
+          controller: "lab1-nsxalbc01.harrythambi.cloud"
+          username: "admin"
+          password: "VMware1!VMware1!"
+
+    - vmware.alb.avi_api_session:
+        <<: *avi_login 
+        http_method: get
+        path: "cloud?name=lab1-nsxt-cloud"
+      register: cloud_data
+      delegate_to: localhost
+
+    # - set_fact:
+    #     vs_name: "empty-vs01"
+    
+    # - set_fact:
+    #     error_page_profile_name: "UOE_ERROR_PAGE_PROFILE"
+
+    - set_fact:
+        tenant: "admin"
+
+    - vmware.alb.avi_api_session:
+        <<: *avi_login 
+        http_method: get
+        path: applicationprofile
+        params:
+          include_name: true
+          sort: name
+          name: "{{applicationprofile_name}}"
+          # cloud_uuid: "{{cloud_data.obj.results[0].uuid}}"
+      register: applicationprofile
+      delegate_to: localhost
+
+    - debug:
+        var: applicationprofile.obj.results[0].http_profile.xff_alternate_name
+
+    - vmware.alb.avi_api_session:
+        <<: *avi_login
+        tenant: "{{tenant}}" 
+        http_method: patch
+        path: "applicationprofile/{{applicationprofile_uuid}}"
+        data:
+          replace:
+            http_profile:
+              xff_alternate_name: "NS-X-Forwarded-For"
+      vars:
+        applicationprofile_uuid: "{{applicationprofile.obj.results[0].uuid}}"
+          
+
+    # - vmware.alb.avi_api_session:
+    #     <<: *avi_login 
+    #     http_method: get
+    #     path: errorpageprofile
+    #     params:
+    #       include_name: true
+    #       sort: name
+    #   register: errorpageprofiles
+    #   delegate_to: localhost
+
+    # - vmware.alb.avi_api_session:
+    #     <<: *avi_login
+    #     tenant: "{{tenant}}" 
+    #     http_method: patch
+    #     path: "virtualservice/{{vs_uuid[0]}}"
+    #     data:
+    #       replace:
+    #         error_page_profile_ref: "{{error_page_profile_url[0]}}"
+    #   vars:
+    #     vs_uuid: "{{virtualservices.obj.results | json_query('[?name==`'~vs_name~'`].uuid')}}"
+    #     error_page_profile_url: "{{errorpageprofiles.obj.results | json_query('[?name==`'~error_page_profile_name~'`].url')}}"
+    #   delegate_to: localhost

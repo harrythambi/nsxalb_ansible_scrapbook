@@ -1,0 +1,42 @@
+---
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{controller}}"
+      username: "{{username}}"
+      password: "{{password}}"
+      tenant: "{{tenant}}" 
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login 
+    http_method: get
+    path: "cloud?name={{cloud_name}}"
+  register: cloud_data
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login 
+    http_method: get
+    path: virtualservice
+    params:
+      include_name: true
+      sort: name
+      cloud_uuid: "{{cloud_data.obj.results[0].uuid}}"
+      name: "{{vs_name}}"
+  register: virtualservice
+  delegate_to: localhost
+
+- vmware.alb.avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "virtualservice/{{vs_uuid}}"
+    data:
+      replace:
+        services:
+          - port: 443
+            enable_ssl: true
+          - port: 80
+            enable_ssl: false
+  vars:
+    vs_uuid: "{{virtualservice.obj.results[0].uuid}}"
+  delegate_to: localhost

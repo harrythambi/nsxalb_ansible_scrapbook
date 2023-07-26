@@ -1,0 +1,5 @@
+---
+- include_tasks: update_vs_for_sorry_page.yml
+  loop: "{{vs_list.split(',')}}"
+  loop_control:
+    loop_var: vs_name

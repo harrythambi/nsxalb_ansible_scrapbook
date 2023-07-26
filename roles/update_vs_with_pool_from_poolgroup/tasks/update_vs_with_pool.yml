@@ -1,0 +1,90 @@
+---
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{controller}}"
+      username: "{{username}}"
+      password: "{{password}}"
+      tenant: "{{tenant}}" 
+
+- set_fact:
+    pool_ref_list: []
+
+- name: Get Referenced Pool Group
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: poolgroup
+    params:
+      referred_by: "virtualservice:{{vs.uuid}}"
+  register: pg_output
+
+- name: 'Get list of Pool members for {{pg_output.obj.results[0].name}}'
+  set_fact:
+    pool_ref_list: "{{ pool_ref_list + [member.pool_ref] }}"
+  loop: "{{pg_output.obj.results[0].members}}"
+  loop_control:
+    loop_var: member
+
+- name: Ensure that there are no more than 1 pool group member
+  ansible.builtin.assert:
+    that:
+      - pool_ref_list | length == 1
+    fail_msg: "Pool Group member is not equal to 1"
+    success_msg: "Pool Group has 1 member"
+
+- name: Get Referenced Pool
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: pool
+    params:
+      referred_by: "poolgroup:{{pg_output.obj.results[0].uuid}}"
+  register: pool_output
+
+- name: Update Pool with Fail Action if exists on Pool Group
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "pool/{{pool_output.obj.results[0].uuid}}"
+    data:
+      replace:
+        fail_action:
+          local_rsp:
+            status_code: "FAIL_HTTP_STATUS_CODE_503"
+          type: "FAIL_ACTION_HTTP_LOCAL_RSP"
+  when: pg_output.obj.results[0].fail_action is defined
+
+- name: Remove Pool Group from Virtual Service
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "virtualservice/{{vs.uuid}}"
+    params:
+      name: "{{vs.name}}"
+    data:
+      replace:
+        pool_group_ref: ""
+
+- name: Remove Pool Group
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: delete
+    path: "poolgroup/{{pg_output.obj.results[0].uuid}}"
+    
+- name: Add pool ref to Virtual Service
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: patch
+    path: "virtualservice/{{vs.uuid}}"
+    params:
+      name: "{{vs.name}}"
+    data:
+      replace:
+        pool_ref: "{{pool_ref_list[0]}}"
