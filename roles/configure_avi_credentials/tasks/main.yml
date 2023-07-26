@@ -1,0 +1,33 @@
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{ avi_hostname }}"
+      username: "{{ avi_username }}"
+      password: "{{ avi_password }}"
+      api_version: "{{ avi_api_version }}"
+
+- name: Create Nsxt user
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: "cloudconnectoruser"
+    api_version: "{{ api_version | default(omit) }}"
+    data:
+      vcenter_credentials:
+            username: "{{ vsphere_username | default(omit) }}"
+            password: "{{ vsphere_password | default(omit) }}"
+      name: "{{pod_name}} vCenter"
+  when: vsphere_username is defined
+
+- name: Create Nsxt user
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: "cloudconnectoruser"
+    api_version: "{{ api_version | default(omit) }}"
+    data:
+      nsxt_credentials:
+            username: "{{ nsxt_username | default(omit) }}"
+            password: "{{ nsxt_password | default(omit) }}"
+      name: "{{pod_name}} NSXT"
+  when: nsxt_username is defined

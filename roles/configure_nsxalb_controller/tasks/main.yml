@@ -1,0 +1,104 @@
+- name: 'Waiting for AVI deployment to complete'
+  wait_for:
+    host: '{{ avi_hostname }}'
+    port: 443  
+    timeout: 900
+  delegate_to: localhost
+
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{ avi_hostname }}"
+      username: "{{ avi_username }}"
+      password: "{{ avi_password }}"
+      api_version: "{{ avi_api_version }}"
+
+- name: "Change admin default password on controller"
+  delegate_to: localhost
+  vmware.alb.avi_useraccount:
+    <<: *avi_login
+    old_password: "58NFaGDJm(PJH0G"  # Found under Downloads - Resources Section
+  ignore_errors: True
+  register: result
+  retries: 20
+  until: result is not failed
+
+- set_fact:
+    dns_list: "{{ dns_list | default([]) + [{'type': 'V4', 'addr': item }] }}"
+  loop: "{{ dns_servers.split(',') }}"
+
+- set_fact:
+    ntp_list: "{{ ntp_list | default([]) + [{'server': {'type': 'DNS', 'addr': item }}] }}"
+  loop: "{{ ntp_servers.split(',') }}"
+
+- name: Initial Controller System Configuration
+  delegate_to: localhost
+  avi_systemconfiguration:
+    <<: *avi_login
+    welcome_workflow_complete: true
+    dns_configuration:
+      server_list: "{{ dns_list }}"
+    ntp_configuration:
+      ntp_servers: "{{ ntp_list }}"
+    default_license_tier: ENTERPRISE
+
+# - name: Set system default license
+#   delegate_to: localhost
+#   avi_api_session:
+#     <<: *avi_login
+#     http_method: patch
+#     path: systemconfiguration
+#     data:
+#       replace:
+#         default_license_tier: ENTERPRISE
+#   register: settings_output
+    
+- name: Set Backup Passphrase
+  delegate_to: localhost
+  avi_backupconfiguration:
+    <<: *avi_login
+    name: Backup-Configuration
+    backup_passphrase: "{{ avi_password }}"
+    upload_to_remote_host: false
+    save_local: True
+
+# - name: Upload Avi License to controller (FILE)
+#   delegate_to: localhost
+#   avi_api_session:
+#     <<: *avi_login
+#     http_method: put
+#     path: license
+#     data:
+#       license_text: "{{ lookup('file', local_file_path~'/'~avi_license_file) }}"
+
+- name: Create System Certificate
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: sslkeyandcertificate
+    data:
+      name: "{{pod_name}}-system-cert"
+      type: "SSL_CERTIFICATE_TYPE_SYSTEM"        
+      certificate:
+        subject:
+          common_name: "{{inventory_hostname}}"
+          country: "UK"
+          email_address: "admin@harrythambi.cloud"
+          locality: "London"
+          organization: "{{domain_name.split('.')[0]}}"
+          organization_unit: "{{pod_name}}"
+          state: "London"
+        self_signed: true
+        signature_algorithm: "sha256WithRSAEncryption"
+
+- name: Update the System with new SSL certificate
+  delegate_to: localhost
+  avi_systemconfiguration:
+    <<: *avi_login
+    avi_api_update_method: patch
+    avi_api_patch_op: replace
+    tenant: admin
+    portal_configuration:
+      sslkeyandcertificate_refs:
+        - "/api/sslkeyandcertificate?name={{pod_name}}-system-cert"

@@ -1,0 +1,181 @@
+- name: set facts
+  set_fact:
+    avi_login: &avi_login
+      controller: "{{ avi_hostname }}"
+      username: "{{ avi_username }}"
+      password: "{{ avi_password }}"
+      api_version: "{{ avi_api_version }}"
+      
+- name: Create vCenter user
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: "cloudconnectoruser"
+    data:
+      vcenter_credentials:
+            username: "{{ vsphere_username | default(omit) }}"
+            password: "{{ vsphere_password | default(omit) }}"
+      name: "{{pod_name}} vCenter"
+
+- name: Get Nsxt credentials URL
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: cloudconnectoruser
+    params:
+      name: "{{pod_name}} vCenter"
+  register: avi_vc_credentials
+
+- name: Create Nsxt user
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: "cloudconnectoruser"
+    data:
+      nsxt_credentials:
+            username: "{{ nsxt_username | default(omit) }}"
+            password: "{{ nsxt_password | default(omit) }}"
+      name: "{{pod_name}} NSXT"
+
+- name: Get Nsxt credentials URL
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: cloudconnectoruser
+    params:
+      name: "{{pod_name}} NSXT"
+  register: avi_nsxt_credentials
+
+- name: Get Overlay Transport Zone
+  delegate_to: localhost
+  ansible.builtin.uri:
+    url: "https://{{nsxt_hostname}}/api/v1/search/query?query=resource_type:TransportZone%20AND%20transport_type:OVERLAY%20AND%20display_name:*{{pod_name}}*"
+    force_basic_auth: true
+    headers:
+      Accept: "application/json"
+      Content-Type: "application/json"        
+    user: "{{nsxt_username}}"
+    password: "{{nsxt_password}}"
+    method: GET
+    body_format: json
+    validate_certs: "{{validate_certs}}"
+  register: transport_zones
+    
+- name: Create NSXT Cloud
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: "cloud"
+    data:
+      name: "{{pod_name}}-NSXT-Cloud"
+      dhcp_enabled: True
+      enable_vip_on_all_interfaces: False
+      enable_vip_static_routes: False
+      ip6_autocfg_enabled: False
+      license_tier: "ENTERPRISE"
+      license_type: "LIC_CORES"
+      mtu: 1500
+      nsxt_configuration:
+        automatedfw_rules: False
+        data_network_config:
+          tier1_segment_config:
+            manual:
+              tier1_lrs:
+                - tier1_lr_id: "/infra/tier-1s/{{pod_name}}-t1-management"
+                  segment_id: "/infra/segments/{{pod_name}}_seg_nsxalb_se_data"
+            segment_config_mode: "TIER1_SEGMENT_MANUAL"
+          transport_zone: "/infra/sites/default/enforcement-points/default/transport-zones/{{nsxt_overlay_transport_zone_id}}"
+          tz_type: "OVERLAY"
+        domain_id: "default"
+        enforcementpoint_id: "default"
+        management_network_config:
+          overlay_segment:
+            tier1_lr_id: "/infra/tier-1s/{{pod_name}}-t1-management"
+            segment_id: "/infra/segments/{{pod_name}}_seg_nsxalb_se_mgmt"
+          transport_zone: "/infra/sites/default/enforcement-points/default/transport-zones/{{nsxt_overlay_transport_zone_id}}"
+          tz_type: "OVERLAY"
+        nsxt_credentials_ref: "{{avi_nsxt_cred_url}}"
+        nsxt_url: "{{nsxt_hostname}}"
+        site_id: "default"
+      obj_name_prefix: "{{pod_name}}-nsxalb"
+      prefer_static_routes: false
+      state_based_dns_registration: True
+      tenant_ref: "https://{{avi_hostname}}/api/tenant/admin"
+      vmc_deployment: False
+      vtype: "CLOUD_NSXT"
+  vars:
+    avi_nsxt_cred_url: "{{avi_nsxt_credentials.obj.results[0].url}}"
+    nsxt_overlay_transport_zone_id: "{{transport_zones.json.results[0].id}}"
+
+- name: Get NSXT Cloud URL
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: get
+    path: cloud
+    params:
+      name: "{{pod_name}}-NSXT-Cloud"
+  register: avi_nsxt_cloud
+
+- name: Get vCenter Content Library
+  delegate_to: localhost
+  vmware.vmware_rest.content_locallibrary_info:
+    vcenter_hostname: '{{vsphere_hostname}}'
+    vcenter_username: '{{vsphere_username}}'
+    vcenter_password: '{{vsphere_password}}'
+    vcenter_validate_certs: '{{validate_certs}}'
+  register: content_library  
+
+- name: Associate vCenter Server
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: post
+    path: vcenterserver
+    data:
+      cloud_ref: "{{avi_nsxt_cloud_url}}"
+      tenant_ref: "https://{{avi_hostname}}/api/tenant/admin"
+      name: "{{pod_name}}-vCenter"
+      vcenter_url: "{{vsphere_host_meta.inventory_hostname}}"
+      vcenter_credentials_ref: "{{avi_vc_cred_url}}"
+      content_lib:
+        id: "{{avi_vc_content_lib}}"
+  vars:
+    avi_vc_cred_url: "{{avi_vc_credentials.obj.results[0].url}}"
+    avi_vc_content_lib: "{{ (content_library.value | selectattr('name','match','nsxalb-se'))[0].id }}"
+    avi_nsxt_cloud_url: "{{ avi_nsxt_cloud.obj.results[0].url }}"
+
+- name: Create Service Engine Group
+  delegate_to: localhost
+  avi_api_session:
+    <<: *avi_login
+    http_method: put
+    path: serviceenginegroup
+    data:
+      name: "{{pod_name}}-mgmt-seg-1"
+      cloud_ref: "/api/cloud?name={{pod_name}}-NSXT-Cloud"
+      algo: PLACEMENT_ALGO_DISTRIBUTED
+      active_standby: false
+      ha_mode: HA_MODE_SHARED_PAIR
+      max_vs_per_se: 10
+      memory_per_se: 2048
+      vcpus_per_se: 1
+      se_name_prexix: mgmt
+      vcenters:
+        - vcenter_ref: "/api/vcenterserver?name={{pod_name}}-vCenter"
+          nsxt_datastores:
+            include: true
+            ds_ids:
+              - vsanDatastore
+          nsxt_clusters:
+            include: true
+            cluster_ids:
+              - "{{pod_name}}_edge_compute"
+      min_scaleout_per_vs: 2
+  vars:
+    avi_nsxt_cloud_url: "{{ avi_nsxt_cloud.obj.results[0].url }}"

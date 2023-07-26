@@ -1,0 +1,47 @@
+- name: Create Content Library for NSXALB
+  gather_facts: False
+  hosts: "{{ lab~'_mgmt_vcenter' }}"
+  roles:
+    - role: configure_vcsa_content_library
+  vars:
+    - target_datastore: shared_datastore
+    - vsphere_hostname: "{{inventory_hostname}}"
+    - vsphere_host_meta: "{{ hostvars[vsphere_hostname] }}"
+    - vsphere_username: "{{ vsphere_host_meta.sso_admin_username  }}"
+    - vsphere_password: "{{ vsphere_host_meta.sso_admin_password }}"
+    - content_library_name: "nsxalb-se"   
+    - content_library_description: "For nsxalb service engines"  
+  tags:
+    - configure_nsxalb_content_lib
+    
+- name: Configure NSXALB Controller 
+  gather_facts: False
+  hosts: "{{ lab~'_avi_controller' }}"
+  become: true
+  roles:
+    - role: configure_nsxalb_controller
+      tags: configure_nsxalb_base_config
+    - role: configure_nsxalb_nsx_cloud
+      tags: configure_nsxalb_nsxt_cloud
+
+  vars: 
+    - avi_hostname: "{{ inventory_hostname }}"
+    - avi_host_meta: "{{ hostvars[avi_hostname] }}"
+    - avi_mgmt_ip: "{{ avi_host_meta.mgmt_interface_ip  }}"
+    - avi_username: "{{ avi_host_meta.ansible_user }}" 
+    - avi_password: "{{ avi_host_meta.ansible_ssh_pass }}"
+    - avi_api_version: "{{ components.avi.api_version }}"   
+    - local_file_path: "{{ generic.archive_local_path }}"
+    - avi_license_file: "Avi_License.yml"
+    - vsphere_hostname: "{{groups[pod_name~'_mgmt_vcenter'][0]}}"
+    - vsphere_host_meta: "{{ hostvars[vsphere_hostname] }}"
+    - vsphere_username: "{{ vsphere_host_meta.sso_admin_username }}"
+    - vsphere_password: "{{ vsphere_host_meta.sso_admin_password }}"    
+    - nsxt_hostname: "{{groups[pod_name~'_nsxt_manager'][0]}}"  
+    - nsxt_host_meta: "{{ hostvars[nsxt_hostname] }}"
+    - nsxt_username: "admin"
+    - nsxt_password: "{{ nsxt_host_meta.ansible_ssh_pass }}"
+    - nsxt_t1: "{{pod_name}}-t1-management"
+    - nsxalb_se_data_seg: "{{pod_name}}_seg_nsxalb_se_data"
+    - nsxalb_se_mgmt_seg: "{{pod_name}}_seg_nsxalb_se_mgmt"
+  tags: configure_nsxalb
